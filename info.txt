@@ -1,0 +1,17 @@
+═════ HOME METHODS ═════
+
+UDP <=== Recommended !* UDP IP PORT TIME 32 50 10
+TCP
+LDAP
+NTP
+STD
+HEX
+
+═════ LAYER 7 METHODS ═════
+
+HTTP
+OVH-HTTP
+═════ GAME METHODS ═════
+
+OVH-GAME
+VSE

